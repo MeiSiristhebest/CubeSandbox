@@ -830,10 +830,12 @@ var TemplateCreateFromImageCommand = cli.Command{
 				if idx < 0 {
 					return fmt.Errorf("invalid annotation %q: expected KEY=VALUE format", kv)
 				}
-				if idx == 0 {
-					return fmt.Errorf("invalid annotation %q: key must not be empty", kv)
+				key := strings.TrimSpace(kv[:idx])
+				val := strings.TrimSpace(kv[idx+1:])
+				if key == "" {
+					return fmt.Errorf("invalid annotation %q: key must not be empty after trimming", kv)
 				}
-				req.Annotations[kv[:idx]] = kv[idx+1:]
+				req.Annotations[key] = val
 			}
 		}
 		body, err := jsoniter.Marshal(req)
