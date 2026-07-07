@@ -25,8 +25,12 @@ pub const ANNO_VM_KERNEL: &str = "cube.vm.kernel.path";
 /// Annotation key used to append extra kernel cmdline parameters.
 pub const ANNO_VM_KERNEL_CMDLINE_APPEND: &str = "cube.vm.kernel.cmdline.append";
 /// Annotation key that enables cgroup v2 (unified hierarchy) in the guest VM.
-/// When set to "true", agent.unified_cgroup_hierarchy=true is appended to kernel cmdline.
+/// When set to "true", CGROUP_V2_KERNEL_PARAM is appended to kernel cmdline.
 pub const ANNO_VM_CGROUP_V2_ENABLE: &str = "cube.vm.cgroup_v2.enable";
+
+/// Kernel cmdline parameter appended when ANNO_VM_CGROUP_V2_ENABLE is "true",
+/// instructing the guest agent to mount the unified cgroup v2 hierarchy.
+pub const CGROUP_V2_KERNEL_PARAM: &str = "agent.unified_cgroup_hierarchy=true";
 pub const ANNO_SNAPSHOT_BASE: &str = "cube.vm.snapshot.base.path";
 pub const ANNO_SNAPSHOT_MEMORY_VOL_URL: &str = "cube.vm.snapshot.memory_vol_url";
 pub const ANNO_APP_SNAPSHOT_CREATE: &str = "cube.appsnapshot.create";
@@ -195,9 +199,11 @@ impl Config {
         };
 
         if anno.get(ANNO_VM_CGROUP_V2_ENABLE).map(|v| v.as_str()) == Some("true") {
-            const CGROUP_V2_PARAM: &str = "agent.unified_cgroup_hierarchy=true";
-            if !extra_kernel_params.iter().any(|p| p == CGROUP_V2_PARAM) {
-                extra_kernel_params.push(CGROUP_V2_PARAM.to_string());
+            if !extra_kernel_params
+                .iter()
+                .any(|p| p == CGROUP_V2_KERNEL_PARAM)
+            {
+                extra_kernel_params.push(CGROUP_V2_KERNEL_PARAM.to_string());
             }
         }
 
@@ -265,6 +271,7 @@ mod tests {
     use crate::sandbox::config::ANNO_SNAPSHOT_BASE;
     use crate::sandbox::config::ANNO_SNAPSHOT_MEMORY_VOL_URL;
     use crate::sandbox::config::ANNO_VM_CGROUP_V2_ENABLE;
+    use crate::sandbox::config::CGROUP_V2_KERNEL_PARAM;
     use crate::sandbox::config::ANNO_VM_KERNEL;
     use crate::sandbox::config::ANNO_VM_KERNEL_CMDLINE_APPEND;
     use crate::sandbox::config::ANNO_VM_RES;
@@ -447,7 +454,7 @@ mod tests {
             config.extra_kernel_params,
             vec![
                 "single=param".to_string(),
-                "agent.unified_cgroup_hierarchy=true".to_string()
+                CGROUP_V2_KERNEL_PARAM.to_string()
             ]
         );
 
@@ -474,7 +481,7 @@ mod tests {
         let config = ret.unwrap();
         assert_eq!(
             config.extra_kernel_params,
-            vec!["agent.unified_cgroup_hierarchy=true".to_string()]
+            vec![CGROUP_V2_KERNEL_PARAM.to_string()]
         );
     }
 }
