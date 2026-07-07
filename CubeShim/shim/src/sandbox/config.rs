@@ -24,6 +24,9 @@ pub const ANNO_SNAPSHOT_NOTIFY: &str = "cube.snapshot.healthcheck";
 pub const ANNO_VM_KERNEL: &str = "cube.vm.kernel.path";
 /// Annotation key used to append extra kernel cmdline parameters.
 pub const ANNO_VM_KERNEL_CMDLINE_APPEND: &str = "cube.vm.kernel.cmdline.append";
+/// Annotation key that enables cgroup v2 (unified hierarchy) in the guest VM.
+/// When set to "true", agent.unified_cgroup_hierarchy=true is appended to kernel cmdline.
+pub const ANNO_VM_CGROUP_V2_ENABLE: &str = "cube.vm.cgroup_v2.enable";
 pub const ANNO_SNAPSHOT_BASE: &str = "cube.vm.snapshot.base.path";
 pub const ANNO_SNAPSHOT_MEMORY_VOL_URL: &str = "cube.vm.snapshot.memory_vol_url";
 pub const ANNO_APP_SNAPSHOT_CREATE: &str = "cube.appsnapshot.create";
@@ -173,7 +176,8 @@ impl Config {
         if let Some(anno) = anno.get(ANNO_VIRTIOFS) {
             virtiofs = Utils::anno_to_obj::<Vec<VirtioFs>>(anno)?;
         }
-        let extra_kernel_params = if let Some(params) = anno.get(ANNO_VM_KERNEL_CMDLINE_APPEND) {
+        let mut extra_kernel_params = if let Some(params) = anno.get(ANNO_VM_KERNEL_CMDLINE_APPEND)
+        {
             let params_vec = Utils::anno_to_obj::<Vec<String>>(params)?;
             params_vec
                 .into_iter()
@@ -189,6 +193,10 @@ impl Config {
         } else {
             Vec::new()
         };
+
+        if anno.get(ANNO_VM_CGROUP_V2_ENABLE).map(|v| v.as_str()) == Some("true") {
+            extra_kernel_params.push("agent.unified_cgroup_hierarchy=true".to_string());
+        }
 
         let c = Config {
             net,
@@ -253,6 +261,7 @@ mod tests {
     use crate::sandbox::config::Config;
     use crate::sandbox::config::ANNO_SNAPSHOT_BASE;
     use crate::sandbox::config::ANNO_SNAPSHOT_MEMORY_VOL_URL;
+    use crate::sandbox::config::ANNO_VM_CGROUP_V2_ENABLE;
     use crate::sandbox::config::ANNO_VM_KERNEL;
     use crate::sandbox::config::ANNO_VM_KERNEL_CMDLINE_APPEND;
     use crate::sandbox::config::ANNO_VM_RES;
@@ -425,5 +434,44 @@ mod tests {
         assert!(ret.is_ok());
         let config = ret.unwrap();
         assert_eq!(config.extra_kernel_params, vec!["single=param".to_string()]);
+
+        // Test 9: cgroup v2 annotation enabled - should append unified_cgroup_hierarchy
+        annotations.insert(ANNO_VM_CGROUP_V2_ENABLE.to_string(), "true".to_string());
+        let ret = Config::new(&Some(annotations.clone()));
+        assert!(ret.is_ok());
+        let config = ret.unwrap();
+        assert_eq!(
+            config.extra_kernel_params,
+            vec![
+                "single=param".to_string(),
+                "agent.unified_cgroup_hierarchy=true".to_string()
+            ]
+        );
+
+        // Test 10: cgroup v2 annotation with false value - should not append
+        annotations.insert(ANNO_VM_CGROUP_V2_ENABLE.to_string(), "false".to_string());
+        let ret = Config::new(&Some(annotations.clone()));
+        assert!(ret.is_ok());
+        let config = ret.unwrap();
+        assert_eq!(config.extra_kernel_params, vec!["single=param".to_string()]);
+
+        // Test 11: cgroup v2 annotation with empty string - should not append
+        annotations.insert(ANNO_VM_CGROUP_V2_ENABLE.to_string(), "".to_string());
+        let ret = Config::new(&Some(annotations.clone()));
+        assert!(ret.is_ok());
+        let config = ret.unwrap();
+        assert_eq!(config.extra_kernel_params, vec!["single=param".to_string()]);
+
+        // Test 12: cgroup v2 enabled, no other cmdline params
+        let mut fresh = HashMap::<String, String>::new();
+        fresh.insert(ANNO_VM_RES.to_string(), res.to_string());
+        fresh.insert(ANNO_VM_CGROUP_V2_ENABLE.to_string(), "true".to_string());
+        let ret = Config::new(&Some(fresh));
+        assert!(ret.is_ok());
+        let config = ret.unwrap();
+        assert_eq!(
+            config.extra_kernel_params,
+            vec!["agent.unified_cgroup_hierarchy=true".to_string()]
+        );
     }
 }

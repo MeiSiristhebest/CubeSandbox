@@ -259,52 +259,6 @@ func (l *local) genCubeVipsOpt(ctx context.Context, c *cubebox.ContainerConfig, 
 	return tmpSpecs, nil
 }
 
-// withCgroupV2KernelCmdline returns a SpecOpt that appends agent.unified_cgroup_hierarchy=true
-// to the kernel cmdline if the request annotation cube.vm.cgroup_v2.enable is set to "true".
-// It merges with any existing cube.vm.kernel.cmdline.append params (e.g. video) rather than overwriting.
-func withCgroupV2KernelCmdline(req *cubebox.RunCubeSandboxRequest) oci.SpecOpts {
-	return func(ctx context.Context, _ oci.Client, _ *containers.Container, s *specs.Spec) error {
-		if req.GetAnnotations() == nil {
-			return nil
-		}
-		if req.GetAnnotations()[constants.AnnotationsVMCgroupV2Enable] != "true" {
-			return nil
-		}
-		if s.Annotations == nil {
-			s.Annotations = make(map[string]string)
-		}
-
-		const cgroupV2Param = "agent.unified_cgroup_hierarchy=true"
-		var params []string
-		if existing := s.Annotations[constants.AnnotationVMKernelCmdlineAppend]; existing != "" {
-			if err := jsoniter.Unmarshal([]byte(existing), &params); err != nil {
-				// Existing annotation is malformed; reset and log a warning.
-				// jsoniter may write partial data on failure, so explicitly nil params
-				// to actually reinitialize (otherwise the log message lies).
-				// This also means legitimate upstream params (e.g. video) are lost,
-				// but in normal operation the CBRI plugin produces valid JSON so
-				// this path should never trigger.
-				params = nil
-				log.G(ctx).Warnf("failed to unmarshal existing %s (%q): %v; reinitializing",
-					constants.AnnotationVMKernelCmdlineAppend, existing, err)
-			}
-		}
-		for _, p := range params {
-			if strings.TrimSpace(p) == cgroupV2Param {
-				return nil // already present, idempotent
-			}
-		}
-		params = append(params, cgroupV2Param)
-		log.G(ctx).Infof("cgroup v2 enabled: appending %s to kernel cmdline (total %d params)", cgroupV2Param, len(params))
-		newJSON, err := jsoniter.Marshal(params)
-		if err != nil {
-			return fmt.Errorf("failed to marshal kernel cmdline params: %w", err)
-		}
-		s.Annotations[constants.AnnotationVMKernelCmdlineAppend] = string(newJSON)
-		return nil
-	}
-}
-
 func WithRootfsPropagation(rootfsPropagation string) oci.SpecOpts {
 	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *specs.Spec) error {
 		if s.Linux == nil {

@@ -254,13 +254,6 @@ func (l *local) createContainers(ctx context.Context, flowOpts *workflow.CreateC
 
 			if ci.IsPod {
 				additionalOpt = append(additionalOpt, additionalSandboxOpt...)
-				// withCgroupV2KernelCmdline must be the LAST SpecOpt appended
-				// within the IsPod block. It reads the already-merged
-				// AnnotationVMKernelCmdlineAppend from upstream SpecOpts (CBRI,
-				// genContainerAnnotationReq) and only then merges the cgroup v2
-				// param. Do NOT add new SpecOpt appends after this line that
-				// write to s.Annotations.
-				additionalOpt = append(additionalOpt, withCgroupV2KernelCmdline(realReq))
 			}
 		} else {
 			containerLog.Errorf("create container oci spec failed.%s", err.Error())
