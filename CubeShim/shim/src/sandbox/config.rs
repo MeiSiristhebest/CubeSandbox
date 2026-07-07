@@ -195,7 +195,10 @@ impl Config {
         };
 
         if anno.get(ANNO_VM_CGROUP_V2_ENABLE).map(|v| v.as_str()) == Some("true") {
-            extra_kernel_params.push("agent.unified_cgroup_hierarchy=true".to_string());
+            const CGROUP_V2_PARAM: &str = "agent.unified_cgroup_hierarchy=true";
+            if !extra_kernel_params.iter().any(|p| p == CGROUP_V2_PARAM) {
+                extra_kernel_params.push(CGROUP_V2_PARAM.to_string());
+            }
         }
 
         let c = Config {

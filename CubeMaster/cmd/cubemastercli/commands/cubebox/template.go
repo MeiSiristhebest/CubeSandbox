@@ -830,6 +830,9 @@ var TemplateCreateFromImageCommand = cli.Command{
 				if idx < 0 {
 					return fmt.Errorf("invalid annotation %q: expected KEY=VALUE format", kv)
 				}
+				if idx == 0 {
+					return fmt.Errorf("invalid annotation %q: key must not be empty", kv)
+				}
 				req.Annotations[kv[:idx]] = kv[idx+1:]
 			}
 		}
