@@ -254,6 +254,10 @@ const (
 	AnnotationVMKernelCmdlineAppend = "cube.vm.kernel.cmdline.append"
 	AnnotationVirtiofs              = "cube.virtiofs"
 
+	// AnnotationsVMCgroupV2Enable enables cgroup v2 (unified hierarchy) in the guest VM.
+	// When set to "true", agent.unified_cgroup_hierarchy=true is appended to the kernel cmdline.
+	AnnotationsVMCgroupV2Enable = "cube.vm.cgroup_v2.enable"
+
 	AnnotationPropagationMounts          = "cube.propagation.mounts"
 	AnnotationPropagationContainerMounts = "cube.propagation.container.mounts"
 	AnnotationPropagationExecMounts      = "cube.propagation.exec.mounts"
