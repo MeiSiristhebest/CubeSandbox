@@ -4,6 +4,7 @@
 package cubesandbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -16,6 +17,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1428,6 +1431,84 @@ func TestFilesWatchDirErrorFromServer(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected error on Errors channel")
+	}
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closeCount int32
+}
+
+func (t *trackingReadCloser) Close() error {
+	atomic.AddInt32(&t.closeCount, 1)
+	return nil
+}
+
+func TestWatcherClosesBodyExactlyOnce(t *testing.T) {
+	body := &trackingReadCloser{
+		Reader: bytes.NewReader(connectEnvelope(connectEndStreamFlag, `{}`)),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events := make(chan WatchEvent, 64)
+	errs := make(chan error, 1)
+	w := &Watcher{
+		Events: events,
+		Errors: errs,
+		events: events,
+		errs:   errs,
+		ctx:    ctx,
+		cancel: cancel,
+		body:   body,
+	}
+
+	w.readLoop()
+
+	// After readLoop exits on natural stream end, Close() should be a no-op
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if count := atomic.LoadInt32(&body.closeCount); count != 1 {
+		t.Fatalf("expected body to be closed exactly once, got %d", count)
+	}
+}
+
+func TestWatcherConcurrentClose(t *testing.T) {
+	pr, pw := io.Pipe()
+	body := &trackingReadCloser{
+		Reader: pr,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events := make(chan WatchEvent, 64)
+	errs := make(chan error, 1)
+	w := &Watcher{
+		Events: events,
+		Errors: errs,
+		events: events,
+		errs:   errs,
+		ctx:    ctx,
+		cancel: cancel,
+		body:   body,
+	}
+
+	go w.readLoop()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = w.Close()
+		}()
+	}
+
+	_ = pw.Close()
+	wg.Wait()
+
+	if count := atomic.LoadInt32(&body.closeCount); count != 1 {
+		t.Fatalf("expected body to be closed exactly once under concurrent Close(), got %d", count)
 	}
 }
 
