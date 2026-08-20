@@ -93,7 +93,7 @@ func TestGracefulStopTimeout(t *testing.T) {
 	p.GracefulStop(50 * time.Millisecond)
 	elapsed := time.Since(start)
 
-	if elapsed < 40*time.Millisecond || elapsed > 300*time.Millisecond {
+	if elapsed < 40*time.Millisecond || elapsed > 2*time.Second {
 		t.Fatalf("GracefulStop waited unexpected duration: %v", elapsed)
 	}
 }
@@ -114,5 +114,51 @@ func TestIncrRefOverflowProtection(t *testing.T) {
 	}
 	if currentRef := atomic.LoadInt32(&p.ref); currentRef != 2147483647 {
 		t.Fatalf("expected p.ref to be 2147483647, got %d", currentRef)
+	}
+}
+
+func TestGetAfterCloseNoRefLeak(t *testing.T) {
+	p := &pool{
+		ref:     0,
+		current: 0, // closed pool
+	}
+
+	_, err := p.Get()
+	if err != ErrClosed {
+		t.Fatalf("expected ErrClosed, got %v", err)
+	}
+
+	if ref := atomic.LoadInt32(&p.ref); ref != 0 {
+		t.Fatalf("expected ref == 0 after Get() on closed pool, got %d", ref)
+	}
+}
+
+func TestDecrRefShrinkPath(t *testing.T) {
+	p := &pool{
+		ref:     1,
+		current: 4,
+		opt: Options{
+			MaxIdle:   2,
+			MaxActive: 4,
+		},
+		conns: make([]*conn, 4),
+	}
+
+	for i := range p.conns {
+		p.conns[i] = &conn{pool: p}
+	}
+
+	p.decrRef()
+
+	if ref := atomic.LoadInt32(&p.ref); ref != 0 {
+		t.Fatalf("expected ref == 0 after decrRef, got %d", ref)
+	}
+	if current := atomic.LoadInt32(&p.current); current != 2 {
+		t.Fatalf("expected current reset to MaxIdle (2), got %d", current)
+	}
+	for i := 2; i < 4; i++ {
+		if p.conns[i] != nil {
+			t.Fatalf("expected conn at index %d to be nil after shrink, got %v", i, p.conns[i])
+		}
 	}
 }

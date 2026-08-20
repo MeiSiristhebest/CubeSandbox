@@ -180,6 +180,7 @@ func (p *pool) Get() (Conn, error) {
 	nextRef := p.incrRef()
 	current := atomic.LoadInt32(&p.current)
 	if current == 0 {
+		p.decrRef()
 		return nil, ErrClosed
 	}
 
