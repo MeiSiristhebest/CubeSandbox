@@ -1512,6 +1512,97 @@ func TestWatcherConcurrentClose(t *testing.T) {
 	}
 }
 
+type errCloser struct {
+	io.Reader
+	err error
+}
+
+func (e *errCloser) Close() error {
+	return e.err
+}
+
+func TestWatcherCloseErrorPreserved(t *testing.T) {
+	expectedErr := errors.New("underlying close failed")
+	body := &errCloser{
+		Reader: bytes.NewReader(connectEnvelope(connectEndStreamFlag, `{}`)),
+		err:    expectedErr,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events := make(chan WatchEvent, 64)
+	errs := make(chan error, 1)
+	w := &Watcher{
+		Events: events,
+		Errors: errs,
+		events: events,
+		errs:   errs,
+		ctx:    ctx,
+		cancel: cancel,
+		body:   body,
+	}
+
+	w.readLoop()
+
+	// Both first Close() and subsequent Close() calls should reliably return the captured closeErr
+	if err := w.Close(); !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+	if err := w.Close(); !errors.Is(err, expectedErr) {
+		t.Fatalf("expected subsequent Close() to preserve %v, got %v", expectedErr, err)
+	}
+}
+
+func TestFilesWatchDirConcurrentCloseLiveServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", connectContentType)
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		w.Write(connectFrame(0, []byte(`{"start":{}}`)))
+		flusher.Flush()
+
+		// Stream events until client disconnects
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				_, _ = w.Write(connectFrame(0, []byte(`{"filesystem":{"name":"x.txt","type":"EVENT_TYPE_CREATE"}}`)))
+				flusher.Flush()
+			}
+		}
+	}))
+	defer server.Close()
+
+	host, port := serverHostPort(t, server.URL)
+	client := NewClient(Config{ProxyNodeIP: host, ProxyPortHTTP: port, SandboxDomain: "cube.test", RequestTimeout: 5 * time.Second})
+	sb := &Sandbox{client: client, SandboxID: "sb-fs-concurrent"}
+
+	watcher, err := sb.Files().WatchDir(context.Background(), "/tmp")
+	if err != nil {
+		t.Fatalf("WatchDir: %v", err)
+	}
+
+	// Consume at least 1 event to ensure stream is active
+	<-watcher.Events
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = watcher.Close()
+		}()
+	}
+
+	wg.Wait()
+
+	// Drain remaining events safely
+	for range watcher.Events {
+	}
+}
+
 func TestBuildTemplateForwardsCreateFromImageOptions(t *testing.T) {
 	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

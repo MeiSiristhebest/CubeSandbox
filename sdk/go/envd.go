@@ -479,25 +479,25 @@ type Watcher struct {
 	Events <-chan WatchEvent
 	Errors <-chan error
 
-	events chan WatchEvent
-	errs   chan error
-	ctx    context.Context
-	cancel context.CancelFunc
-	body   io.ReadCloser
-	once   sync.Once
+	events   chan WatchEvent
+	errs     chan error
+	ctx      context.Context
+	cancel   context.CancelFunc
+	body     io.ReadCloser
+	closeErr error
+	once     sync.Once
 }
 
 // closeBody closes the response body exactly once, whether the stream ended
 // naturally (readLoop) or was torn down early (Close).
 func (w *Watcher) closeBody() error {
-	var err error
 	w.once.Do(func() {
 		w.cancel()
 		if w.body != nil {
-			err = w.body.Close()
+			w.closeErr = w.body.Close()
 		}
 	})
-	return err
+	return w.closeErr
 }
 
 // Close terminates the watcher and releases resources.
