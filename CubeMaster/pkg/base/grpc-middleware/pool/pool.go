@@ -111,11 +111,15 @@ func New(ua, address string, option Options) (Pool, error) {
 }
 
 func (p *pool) incrRef() int32 {
-	newRef := atomic.AddInt32(&p.ref, 1)
-	if newRef >= math.MaxInt32 {
-		newRef = math.MaxInt32
+	for {
+		old := atomic.LoadInt32(&p.ref)
+		if old >= math.MaxInt32 {
+			return math.MaxInt32
+		}
+		if atomic.CompareAndSwapInt32(&p.ref, old, old+1) {
+			return old + 1
+		}
 	}
-	return newRef
 }
 
 func (p *pool) decrRef() {
@@ -123,9 +127,17 @@ func (p *pool) decrRef() {
 		return
 	}
 
-	newRef := atomic.AddInt32(&p.ref, -1)
-	if newRef < 0 {
-		newRef = 0
+	var newRef int32
+	for {
+		old := atomic.LoadInt32(&p.ref)
+		if old <= 0 {
+			newRef = 0
+			break
+		}
+		if atomic.CompareAndSwapInt32(&p.ref, old, old-1) {
+			newRef = old - 1
+			break
+		}
 	}
 
 	if newRef == 0 && atomic.LoadInt32(&p.current) > int32(p.opt.MaxIdle) {
@@ -136,7 +148,6 @@ func (p *pool) decrRef() {
 		}
 		p.Unlock()
 	}
-
 }
 
 func (p *pool) reset(index int) {
@@ -237,25 +248,23 @@ func (p *pool) Close() error {
 }
 
 func (p *pool) GracefulStop(maxWaitTime time.Duration) {
-	done := make(chan struct{}, 1)
+	timer := time.NewTimer(maxWaitTime)
+	defer timer.Stop()
 
-	go func() {
-		for {
-			if atomic.LoadInt32(&p.ref) <= 0 {
-				p.Close()
-				done <- struct{}{}
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if atomic.LoadInt32(&p.ref) <= 0 {
+			_ = p.Close()
+			return
 		}
-	}()
-
-	select {
-	case <-done:
-		return
-	case <-time.After(maxWaitTime):
-		p.Close()
-		return
+		select {
+		case <-timer.C:
+			_ = p.Close()
+			return
+		case <-ticker.C:
+		}
 	}
 }
 

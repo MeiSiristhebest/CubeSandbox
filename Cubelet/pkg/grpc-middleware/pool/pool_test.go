@@ -1,13 +1,118 @@
 // Copyright (c) 2024 Tencent Inc.
 // SPDX-License-Identifier: Apache-2.0
-//
 
 package pool
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
-func TestAddress(t *testing.T) {
+func TestDecrRefUnderflow(t *testing.T) {
+	p := &pool{
+		ref:     0,
+		current: 1,
+	}
 
+	// Calling decrRef when ref is 0 should NOT drive p.ref below 0
+	p.decrRef()
+	if currentRef := atomic.LoadInt32(&p.ref); currentRef < 0 {
+		t.Fatalf("expected ref >= 0 after underflow decrRef, got %d", currentRef)
+	}
+
+	// Multiple redundant decrRef calls should stay clamped at 0
+	for i := 0; i < 5; i++ {
+		p.decrRef()
+	}
+	if currentRef := atomic.LoadInt32(&p.ref); currentRef != 0 {
+		t.Fatalf("expected ref == 0 after multiple redundant decrRefs, got %d", currentRef)
+	}
+
+	// Subsequent incrRef should correctly increment from 0 to 1
+	newRef := p.incrRef()
+	if newRef != 1 {
+		t.Fatalf("expected incrRef to return 1, got %d", newRef)
+	}
+	if currentRef := atomic.LoadInt32(&p.ref); currentRef != 1 {
+		t.Fatalf("expected p.ref == 1, got %d", currentRef)
+	}
+}
+
+func TestGracefulStopImmediateWhenZeroRef(t *testing.T) {
+	p := &pool{
+		ref:     0,
+		current: 1,
+	}
+
+	start := time.Now()
+	p.GracefulStop(1 * time.Second)
+	elapsed := time.Since(start)
+
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("GracefulStop took %v with ref=0; should have returned immediately", elapsed)
+	}
+}
+
+func TestConcurrentIncrDecrRef(t *testing.T) {
+	p := &pool{
+		ref:     0,
+		current: 1,
+	}
+
+	var wg sync.WaitGroup
+	workers := 20
+	iterations := 1000
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				p.incrRef()
+				p.decrRef()
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if ref := atomic.LoadInt32(&p.ref); ref < 0 {
+		t.Fatalf("ref corrupted to negative value: %d", ref)
+	}
+}
+
+func TestGracefulStopTimeout(t *testing.T) {
+	p := &pool{
+		ref:     2,
+		current: 1,
+	}
+
+	start := time.Now()
+	p.GracefulStop(50 * time.Millisecond)
+	elapsed := time.Since(start)
+
+	if elapsed < 40*time.Millisecond || elapsed > 300*time.Millisecond {
+		t.Fatalf("GracefulStop waited unexpected duration: %v", elapsed)
+	}
+}
+
+func TestIncrRefOverflowProtection(t *testing.T) {
+	p := &pool{
+		ref:     2147483646,
+		current: 1,
+	}
+
+	r1 := p.incrRef()
+	if r1 != 2147483647 {
+		t.Fatalf("expected 2147483647, got %d", r1)
+	}
+	r2 := p.incrRef()
+	if r2 != 2147483647 {
+		t.Fatalf("expected clamped at MaxInt32 (2147483647), got %d", r2)
+	}
+	if currentRef := atomic.LoadInt32(&p.ref); currentRef != 2147483647 {
+		t.Fatalf("expected p.ref to be 2147483647, got %d", currentRef)
+	}
 }
