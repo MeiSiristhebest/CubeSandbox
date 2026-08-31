@@ -16,6 +16,7 @@ ARG RUST_TOOLCHAIN_DEFAULT=1.89
 ARG RUST_TOOLCHAIN_HYPERVISOR=1.77.2
 ARG RUST_TOOLCHAIN_E2BAPI=1.85
 ARG RUST_TOOLCHAIN_AGENT=1.89
+ARG GITHUB_ACTIONS=false
 # Base URLs for Rustup. Defaults to upstream official https://static.rust-lang.org.
 # Set via `make builder-image MIRROR=cn` to use China-reachable mirror https://rsproxy.cn.
 ARG RUSTUP_DIST_SERVER=https://static.rust-lang.org
