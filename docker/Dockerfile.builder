@@ -176,20 +176,20 @@ RUN /usr/bin/python3.9 -m venv /opt/s3lvol-tools \
         tabulate==0.9.0 \
         pyelftools==0.31
 
-# Install clang-14. With LLVM_MIRROR_BASE set, fetch llvm.sh from the mirror and
-# pass `-m` so the apt repo/packages resolve to the mirror too (the upstream
-# script otherwise hardcodes BASE_URL=apt.llvm.org). The GPG key is vendored:
-# llvm.sh skips download_key when /etc/apt/trusted.gpg.d/apt.llvm.org.asc exists.
-# Fingerprint: 6084 F3CF 814B 57C1 CF12 EFD5 15CF 4D18 AF4F 7421
+# Install clang-14. With LLVM_MIRROR_BASE set, configure apt repo using the mirror base URL;
+# otherwise default to http://apt.llvm.org. The GPG key is vendored in
+# docker/llvm-snapshot.gpg.key. Fingerprint: 6084 F3CF 814B 57C1 CF12 EFD5 15CF 4D18 AF4F 7421
 COPY docker/llvm-snapshot.gpg.key /etc/apt/trusted.gpg.d/apt.llvm.org.asc
 RUN set -eux; \
     if [ -n "${LLVM_MIRROR_BASE}" ]; then \
-        script_url="${LLVM_MIRROR_BASE}/llvm.sh"; set -- 14 -m "${LLVM_MIRROR_BASE}"; \
+        base_url="${LLVM_MIRROR_BASE}"; \
     else \
-        script_url="https://apt.llvm.org/llvm.sh"; set -- 14; \
+        base_url="http://apt.llvm.org"; \
     fi; \
-    wget -O /tmp/llvm.sh "${script_url}"; bash /tmp/llvm.sh "$@"; rm -f /tmp/llvm.sh; \
-    apt-get install -y llvm-14 \
+    echo "deb ${base_url}/focal/ llvm-toolchain-focal-14 main" > /etc/apt/sources.list.d/llvm-14.list; \
+    echo "deb-src ${base_url}/focal/ llvm-toolchain-focal-14 main" >> /etc/apt/sources.list.d/llvm-14.list; \
+    apt-get update -o Acquire::Retries=3 \
+    && apt-get install -y --no-install-recommends clang-14 llvm-14 lld-14 lldb-14 \
     && rm -rf /var/lib/apt/lists/* && clang-14 --version && llvm-strip-14 --version \
     && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100 \
     && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100 \
