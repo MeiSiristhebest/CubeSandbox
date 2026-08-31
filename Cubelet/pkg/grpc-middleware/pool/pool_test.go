@@ -220,3 +220,21 @@ func TestGetDialFailureNoRefLeak(t *testing.T) {
 		t.Fatalf("expected ref == 1 after expansion dial failure in Get(), got %d", ref)
 	}
 }
+
+func TestGetNilConnAfterCloseRace(t *testing.T) {
+	p := &pool{
+		ref:     0,
+		current: 1,
+		opt: Options{
+			OptionType: SingleConn,
+		},
+		conns: make([]*conn, 1),
+	}
+	_, err := p.Get()
+	if err != ErrClosed {
+		t.Fatalf("expected ErrClosed when conns[0] is nil, got %v", err)
+	}
+	if ref := atomic.LoadInt32(&p.ref); ref != 0 {
+		t.Fatalf("expected ref == 0 after nil conn check, got %d", ref)
+	}
+}

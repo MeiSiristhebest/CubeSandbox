@@ -288,7 +288,10 @@ func (p *pool) GracefulStop(maxWaitTime time.Duration) {
 }
 
 func (p *pool) CheckConnStatus(conn *conn) (*conn, error) {
-
+	if conn == nil {
+		p.decrRef()
+		return nil, ErrClosed
+	}
 	return conn, nil
 }
 
