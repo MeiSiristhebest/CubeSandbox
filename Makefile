@@ -117,10 +117,14 @@ endif
 # MIRROR=cn used by deploy/one-click.
 APT_MIRROR_BASE ?= http://mirrors.tencent.com
 LLVM_MIRROR_BASE ?= https://mirrors.zju.edu.cn/llvm-apt
+RUSTUP_DIST_SERVER ?= https://rsproxy.cn
+RUSTUP_UPDATE_ROOT ?= https://rsproxy.cn/rustup
 BUILDER_BUILD_ARGS ?=
 ifeq ($(MIRROR),cn)
 BUILDER_BUILD_ARGS += --build-arg 'APT_MIRROR_BASE=$(APT_MIRROR_BASE)'
 BUILDER_BUILD_ARGS += --build-arg 'LLVM_MIRROR_BASE=$(LLVM_MIRROR_BASE)'
+BUILDER_BUILD_ARGS += --build-arg 'RUSTUP_DIST_SERVER=$(RUSTUP_DIST_SERVER)'
+BUILDER_BUILD_ARGS += --build-arg 'RUSTUP_UPDATE_ROOT=$(RUSTUP_UPDATE_ROOT)'
 else ifneq ($(MIRROR),)
 $(warning MIRROR='$(MIRROR)' is not recognized by builder-image; expected 'cn' or empty -- building against upstream ubuntu and apt.llvm.org sources)
 endif

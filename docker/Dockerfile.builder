@@ -16,9 +16,10 @@ ARG RUST_TOOLCHAIN_DEFAULT=1.89
 ARG RUST_TOOLCHAIN_HYPERVISOR=1.77.2
 ARG RUST_TOOLCHAIN_E2BAPI=1.85
 ARG RUST_TOOLCHAIN_AGENT=1.89
-ARG GITHUB_ACTIONS=false
-ARG RUSTUP_DIST_SERVER=https://rsproxy.cn
-ARG RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
+# Base URLs for Rustup. Defaults to upstream official https://static.rust-lang.org.
+# Set via `make builder-image MIRROR=cn` to use China-reachable mirror https://rsproxy.cn.
+ARG RUSTUP_DIST_SERVER=https://static.rust-lang.org
+ARG RUSTUP_UPDATE_ROOT=https://static.rust-lang.org/rustup
 # Base URL of a China-reachable LLVM apt mirror (e.g. set via `make builder-image
 # MIRROR=cn`). When set, the clang-14 apt packages are sourced from this mirror;
 # empty uses upstream apt.llvm.org. The GPG signing key is copied from
