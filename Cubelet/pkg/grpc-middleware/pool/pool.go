@@ -207,7 +207,11 @@ func (p *pool) Get() (Conn, error) {
 		}
 
 		c, err := p.opt.Dial(p.address)
-		return p.wrapConn(c, true), err
+		if err != nil {
+			p.decrRef()
+			return nil, err
+		}
+		return p.wrapConn(c, true), nil
 	}
 
 	p.Lock()
@@ -233,6 +237,7 @@ func (p *pool) Get() (Conn, error) {
 		atomic.StoreInt32(&p.current, current)
 		if err != nil {
 			p.Unlock()
+			p.decrRef()
 			return nil, err
 		}
 	}

@@ -4,10 +4,13 @@
 package pool
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc"
 )
 
 func TestDecrRefUnderflow(t *testing.T) {
@@ -160,5 +163,54 @@ func TestDecrRefShrinkPath(t *testing.T) {
 		if p.conns[i] != nil {
 			t.Fatalf("expected conn at index %d to be nil after shrink, got %v", i, p.conns[i])
 		}
+	}
+}
+
+func TestGetDialFailureNoRefLeak(t *testing.T) {
+	dialErr := errors.New("dial failure")
+	p := &pool{
+		ref:     2,
+		current: 2,
+		opt: Options{
+			MaxIdle:              1,
+			MaxActive:            2,
+			MaxConcurrentStreams: 1,
+			Reuse:                false,
+			Dial: func(ua, address string) (*grpc.ClientConn, error) {
+				return nil, dialErr
+			},
+		},
+		conns: make([]*conn, 2),
+	}
+
+	// Case 1: current >= MaxActive with Reuse=false dial error
+	_, err := p.Get()
+	if err != dialErr {
+		t.Fatalf("expected dialErr, got %v", err)
+	}
+	if ref := atomic.LoadInt32(&p.ref); ref != 2 {
+		t.Fatalf("expected ref == 2 after dial failure in Get(), got %d", ref)
+	}
+
+	// Case 2: expansion block dial error
+	p2 := &pool{
+		ref:     1,
+		current: 1,
+		opt: Options{
+			MaxIdle:              1,
+			MaxActive:            4,
+			MaxConcurrentStreams: 1,
+			Dial: func(ua, address string) (*grpc.ClientConn, error) {
+				return nil, dialErr
+			},
+		},
+		conns: make([]*conn, 4),
+	}
+	_, err2 := p2.Get()
+	if err2 != dialErr {
+		t.Fatalf("expected dialErr, got %v", err2)
+	}
+	if ref := atomic.LoadInt32(&p2.ref); ref != 1 {
+		t.Fatalf("expected ref == 1 after expansion dial failure in Get(), got %d", ref)
 	}
 }
