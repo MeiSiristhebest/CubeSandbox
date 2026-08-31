@@ -188,12 +188,13 @@ RUN set -eux; \
     else \
         base_url="https://apt.llvm.org"; \
     fi; \
+    base_url="${base_url%/}"; \
     echo "deb ${base_url}/${distro}/ llvm-toolchain-${distro}-14 main" > /etc/apt/sources.list.d/llvm-14.list; \
     apt-get update -o Acquire::Retries=3 \
-    && apt-get install -y --no-install-recommends clang-14 llvm-14 lld-14 lldb-14 \
+    && apt-get install -y --no-install-recommends clang-14 llvm-14 lld-14 lldb-14 libclang-14-dev llvm-14-dev clang-tools-14 \
     && rm -rf /var/lib/apt/lists/* && clang-14 --version && llvm-strip-14 --version \
-    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100 \
-    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100 \
+    && update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 200 \
+    && update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 200 \
     && if [ -x /usr/bin/llvm-strip-14 ] && [ ! -e /usr/local/bin/llvm-strip ]; then ln -s /usr/bin/llvm-strip-14 /usr/local/bin/llvm-strip; fi \
     && if [ ! -e /usr/bin/musl-g++ ]; then ln -s /usr/bin/g++ /usr/bin/musl-g++; fi
 
