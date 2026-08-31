@@ -51,7 +51,10 @@ type pool struct {
 }
 
 func (p *pool) GetActiveTimeAndRef() (time.Time, int32) {
-	return p.active, p.ref
+	p.RLock()
+	active := p.active
+	p.RUnlock()
+	return active, atomic.LoadInt32(&p.ref)
 }
 
 func New(ua, address string, option Options) (Pool, error) {
@@ -215,6 +218,11 @@ func (p *pool) Get() (Conn, error) {
 
 	p.Lock()
 	current = atomic.LoadInt32(&p.current)
+	if current == 0 {
+		p.Unlock()
+		p.decrRef()
+		return nil, ErrClosed
+	}
 	if current < int32(p.opt.MaxActive) && nextRef > current*int32(p.opt.MaxConcurrentStreams) {
 
 		increment := current
@@ -241,6 +249,10 @@ func (p *pool) Get() (Conn, error) {
 		}
 	}
 	p.Unlock()
+	if current == 0 {
+		p.decrRef()
+		return nil, ErrClosed
+	}
 	next := atomic.AddUint32(&p.index, 1) % uint32(current)
 	return p.CheckConnStatus(p.conns[next])
 }

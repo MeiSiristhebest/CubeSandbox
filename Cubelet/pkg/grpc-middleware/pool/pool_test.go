@@ -74,15 +74,21 @@ func TestConcurrentIncrDecrRef(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
 				p.incrRef()
+				if cur := atomic.LoadInt32(&p.ref); cur < 0 {
+					t.Errorf("ref underflow during concurrent incr: %d", cur)
+				}
 				p.decrRef()
+				if cur := atomic.LoadInt32(&p.ref); cur < 0 {
+					t.Errorf("ref underflow during concurrent decr: %d", cur)
+				}
 			}
 		}()
 	}
 
 	wg.Wait()
 
-	if ref := atomic.LoadInt32(&p.ref); ref < 0 {
-		t.Fatalf("ref corrupted to negative value: %d", ref)
+	if ref := atomic.LoadInt32(&p.ref); ref != 0 {
+		t.Fatalf("expected ref == 0 after balanced concurrent ops, got: %d", ref)
 	}
 }
 
