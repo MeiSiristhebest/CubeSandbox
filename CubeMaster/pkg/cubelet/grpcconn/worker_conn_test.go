@@ -12,6 +12,10 @@ import (
 	grpcpool "github.com/tencentcloud/CubeSandbox/CubeMaster/pkg/base/grpc-middleware/pool"
 )
 
+type mockConn struct {
+	grpcpool.Conn
+}
+
 type mockPool struct {
 	closed bool
 	ref    int32
@@ -19,7 +23,7 @@ type mockPool struct {
 }
 
 func (m *mockPool) Get() (grpcpool.Conn, error) {
-	return nil, nil
+	return &mockConn{}, nil
 }
 
 func (m *mockPool) GetActiveTimeAndRef() (time.Time, int32) {
@@ -40,6 +44,9 @@ func (m *mockPool) Status() string {
 }
 
 func TestCloseWorkerConnKeyMismatch(t *testing.T) {
+	oldPool := connPool
+	t.Cleanup(func() { connPool = oldPool })
+
 	pool1 := &mockPool{}
 	pool2 := &mockPool{}
 	pool3 := &mockPool{}
@@ -96,12 +103,18 @@ func TestCloseWorkerConnKeyMismatch(t *testing.T) {
 }
 
 func TestCloseWorkerConnNilPool(t *testing.T) {
+	oldPool := connPool
+	t.Cleanup(func() { connPool = oldPool })
+
 	connPool = nil
 	// Should not panic
 	CloseWorkerConn("192.168.1.100:12345")
 }
 
 func TestGetWorkerConnUninitialized(t *testing.T) {
+	oldPool := connPool
+	t.Cleanup(func() { connPool = oldPool })
+
 	connPool = nil
 	ctx := context.Background()
 	_, err := GetWorkerConn(ctx, "192.168.1.100:12345")
@@ -111,6 +124,9 @@ func TestGetWorkerConnUninitialized(t *testing.T) {
 }
 
 func TestGetWorkerConnCached(t *testing.T) {
+	oldPool := connPool
+	t.Cleanup(func() { connPool = oldPool })
+
 	connPool = &workerGrpcConnPool{
 		ctx: context.Background(),
 	}
@@ -126,7 +142,7 @@ func TestGetWorkerConnCached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if conn != nil {
-		t.Fatalf("expected nil conn from mockPool.Get()")
+	if conn == nil {
+		t.Fatalf("expected non-nil conn from mockPool.Get()")
 	}
 }
