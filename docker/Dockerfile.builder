@@ -20,9 +20,9 @@ ARG GITHUB_ACTIONS=false
 ARG RUSTUP_DIST_SERVER=https://rsproxy.cn
 ARG RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
 # Base URL of a China-reachable LLVM apt mirror (e.g. set via `make builder-image
-# MIRROR=cn`). When set, the llvm.sh installer script and the clang-14 apt packages
-# are sourced from this mirror; empty uses upstream apt.llvm.org. The GPG signing
-# key is copied from docker/llvm-snapshot.gpg.key so llvm.sh does not wget it.
+# MIRROR=cn`). When set, the clang-14 apt packages are sourced from this mirror;
+# empty uses upstream apt.llvm.org. The GPG signing key is copied from
+# docker/llvm-snapshot.gpg.key so the build does not fetch it from apt.llvm.org.
 ARG LLVM_MIRROR_BASE=
 ARG TARGETARCH
 
@@ -177,17 +177,18 @@ RUN /usr/bin/python3.9 -m venv /opt/s3lvol-tools \
         pyelftools==0.31
 
 # Install clang-14. With LLVM_MIRROR_BASE set, configure apt repo using the mirror base URL;
-# otherwise default to http://apt.llvm.org. The GPG key is vendored in
+# otherwise default to https://apt.llvm.org. The GPG key is vendored in
 # docker/llvm-snapshot.gpg.key. Fingerprint: 6084 F3CF 814B 57C1 CF12 EFD5 15CF 4D18 AF4F 7421
 COPY docker/llvm-snapshot.gpg.key /etc/apt/trusted.gpg.d/apt.llvm.org.asc
 RUN set -eux; \
+    . /etc/os-release; \
+    distro="${VERSION_CODENAME}"; \
     if [ -n "${LLVM_MIRROR_BASE}" ]; then \
         base_url="${LLVM_MIRROR_BASE}"; \
     else \
-        base_url="http://apt.llvm.org"; \
+        base_url="https://apt.llvm.org"; \
     fi; \
-    echo "deb ${base_url}/focal/ llvm-toolchain-focal-14 main" > /etc/apt/sources.list.d/llvm-14.list; \
-    echo "deb-src ${base_url}/focal/ llvm-toolchain-focal-14 main" >> /etc/apt/sources.list.d/llvm-14.list; \
+    echo "deb ${base_url}/${distro}/ llvm-toolchain-${distro}-14 main" > /etc/apt/sources.list.d/llvm-14.list; \
     apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends clang-14 llvm-14 lld-14 lldb-14 \
     && rm -rf /var/lib/apt/lists/* && clang-14 --version && llvm-strip-14 --version \

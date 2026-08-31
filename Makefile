@@ -109,12 +109,12 @@ endif
 
 # Builder image build-args. Set MIRROR=cn to source packages from China-reachable
 # mirrors: the ubuntu apt archive (amd64 -> $(APT_MIRROR_BASE)/ubuntu, arm64 ->
-# $(APT_MIRROR_BASE)/ubuntu-ports) plus the llvm.sh installer script and clang-14
-# apt packages (override the LLVM mirror host with LLVM_MIRROR_BASE=...). Unset
-# builds against upstream archive.ubuntu.com/ports.ubuntu.com and apt.llvm.org.
-# The LLVM GPG signing key is vendored at docker/llvm-snapshot.gpg.key so the
-# image build does not wget it from apt.llvm.org. This build-time MIRROR is
-# unrelated to the runtime MIRROR=cn used by deploy/one-click.
+# $(APT_MIRROR_BASE)/ubuntu-ports) plus the clang-14 apt packages (override the
+# LLVM mirror host with LLVM_MIRROR_BASE=...). Unset builds against upstream
+# archive.ubuntu.com/ports.ubuntu.com and apt.llvm.org. The LLVM GPG signing key
+# is vendored at docker/llvm-snapshot.gpg.key so the image build does not wget
+# it from apt.llvm.org. This build-time MIRROR is unrelated to the runtime
+# MIRROR=cn used by deploy/one-click.
 APT_MIRROR_BASE ?= http://mirrors.tencent.com
 LLVM_MIRROR_BASE ?= https://mirrors.zju.edu.cn/llvm-apt
 BUILDER_BUILD_ARGS ?=
