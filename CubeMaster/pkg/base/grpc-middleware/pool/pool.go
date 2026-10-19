@@ -17,7 +17,14 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-var ErrClosed = errors.New("pool is closed")
+var (
+	ErrClosed = errors.New("pool is closed")
+	// ErrRefOverflow is returned when the pool cannot reserve another
+	// reference because the counter is saturated. This is unreachable in
+	// practice (it needs math.MaxInt32 outstanding references), but it keeps
+	// the counter and the "reference acquired" contract consistent.
+	ErrRefOverflow = errors.New("pool reference count overflow")
+)
 
 type Pool interface {
 	Get() (Conn, error)
@@ -52,9 +59,8 @@ type pool struct {
 
 func (p *pool) GetActiveTimeAndRef() (time.Time, int32) {
 	p.RLock()
-	active := p.active
-	p.RUnlock()
-	return active, atomic.LoadInt32(&p.ref)
+	defer p.RUnlock()
+	return p.active, atomic.LoadInt32(&p.ref)
 }
 
 func New(ua, address string, option Options) (Pool, error) {
@@ -113,14 +119,17 @@ func New(ua, address string, option Options) (Pool, error) {
 	return p, nil
 }
 
-func (p *pool) incrRef() int32 {
+// incrRef reserves one reference and reports whether the reservation
+// succeeded. When the counter is saturated no reference is reserved, so the
+// caller must not hand out a connection.
+func (p *pool) incrRef() (int32, bool) {
 	for {
 		old := atomic.LoadInt32(&p.ref)
 		if old >= math.MaxInt32 {
-			return math.MaxInt32
+			return old, false
 		}
 		if atomic.CompareAndSwapInt32(&p.ref, old, old+1) {
-			return old + 1
+			return old + 1, true
 		}
 	}
 }
@@ -130,27 +139,30 @@ func (p *pool) decrRef() {
 		return
 	}
 
-	var newRef int32
+	// Only a real 1 -> 0 transition may shrink the pool. A redundant
+	// decrement (ref already 0) must not change current or tear down conns.
+	reachedZero := false
 	for {
 		old := atomic.LoadInt32(&p.ref)
 		if old <= 0 {
-			newRef = 0
 			break
 		}
 		if atomic.CompareAndSwapInt32(&p.ref, old, old-1) {
-			newRef = old - 1
+			reachedZero = old == 1
 			break
 		}
 	}
 
-	if newRef == 0 && atomic.LoadInt32(&p.current) > int32(p.opt.MaxIdle) {
-		p.Lock()
-		if atomic.LoadInt32(&p.ref) == 0 {
-			atomic.StoreInt32(&p.current, int32(p.opt.MaxIdle))
-			p.deleteFrom(p.opt.MaxIdle)
-		}
-		p.Unlock()
+	if !reachedZero || atomic.LoadInt32(&p.current) <= int32(p.opt.MaxIdle) {
+		return
 	}
+
+	p.Lock()
+	if atomic.LoadInt32(&p.ref) == 0 {
+		atomic.StoreInt32(&p.current, int32(p.opt.MaxIdle))
+		p.deleteFrom(p.opt.MaxIdle)
+	}
+	p.Unlock()
 }
 
 func (p *pool) reset(index int) {
@@ -180,7 +192,10 @@ func (p *pool) Get() (Conn, error) {
 		p.Unlock()
 	}()
 
-	nextRef := p.incrRef()
+	nextRef, ok := p.incrRef()
+	if !ok {
+		return nil, ErrRefOverflow
+	}
 	current := atomic.LoadInt32(&p.current)
 	if current == 0 {
 		p.decrRef()
@@ -249,10 +264,6 @@ func (p *pool) Get() (Conn, error) {
 		}
 	}
 	p.Unlock()
-	if current == 0 {
-		p.decrRef()
-		return nil, ErrClosed
-	}
 	next := atomic.AddUint32(&p.index, 1) % uint32(current)
 	return p.CheckConnStatus(p.conns[next])
 }

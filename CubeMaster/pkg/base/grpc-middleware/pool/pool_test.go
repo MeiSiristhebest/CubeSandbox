@@ -5,6 +5,7 @@ package pool
 
 import (
 	"errors"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,7 +35,10 @@ func TestDecrRefUnderflow(t *testing.T) {
 	}
 
 	// Subsequent incrRef should correctly increment from 0 to 1
-	newRef := p.incrRef()
+	newRef, ok := p.incrRef()
+	if !ok {
+		t.Fatal("expected incrRef to succeed")
+	}
 	if newRef != 1 {
 		t.Fatalf("expected incrRef to return 1, got %d", newRef)
 	}
@@ -73,7 +77,10 @@ func TestConcurrentIncrDecrRef(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < iterations; j++ {
-				p.incrRef()
+				if _, ok := p.incrRef(); !ok {
+					t.Errorf("incrRef saturated unexpectedly")
+					return
+				}
 				if cur := atomic.LoadInt32(&p.ref); cur < 0 {
 					t.Errorf("ref underflow during concurrent incr: %d", cur)
 				}
@@ -109,20 +116,26 @@ func TestGracefulStopTimeout(t *testing.T) {
 
 func TestIncrRefOverflowProtection(t *testing.T) {
 	p := &pool{
-		ref:     2147483646,
+		ref:     math.MaxInt32 - 1,
 		current: 1,
 	}
 
-	r1 := p.incrRef()
-	if r1 != 2147483647 {
-		t.Fatalf("expected 2147483647, got %d", r1)
+	ref, ok := p.incrRef()
+	if !ok || ref != math.MaxInt32 {
+		t.Fatalf("expected successful increment to MaxInt32, got ref=%d ok=%v", ref, ok)
 	}
-	r2 := p.incrRef()
-	if r2 != 2147483647 {
-		t.Fatalf("expected clamped at MaxInt32 (2147483647), got %d", r2)
+	if ref, ok = p.incrRef(); ok {
+		t.Fatalf("expected saturation at MaxInt32, got ref=%d ok=%v", ref, ok)
 	}
-	if currentRef := atomic.LoadInt32(&p.ref); currentRef != 2147483647 {
-		t.Fatalf("expected p.ref to be 2147483647, got %d", currentRef)
+	if currentRef := atomic.LoadInt32(&p.ref); currentRef != math.MaxInt32 {
+		t.Fatalf("expected p.ref to stay at MaxInt32, got %d", currentRef)
+	}
+
+	if _, err := p.Get(); err != ErrRefOverflow {
+		t.Fatalf("expected ErrRefOverflow from Get, got %v", err)
+	}
+	if currentRef := atomic.LoadInt32(&p.ref); currentRef != math.MaxInt32 {
+		t.Fatalf("Get on a saturated pool must not change ref, got %d", currentRef)
 	}
 }
 
@@ -221,7 +234,7 @@ func TestGetDialFailureNoRefLeak(t *testing.T) {
 	}
 }
 
-func TestGetNilConnAfterCloseRace(t *testing.T) {
+func TestGetNilConnReturnsErrClosed(t *testing.T) {
 	p := &pool{
 		ref:     0,
 		current: 1,
@@ -236,5 +249,78 @@ func TestGetNilConnAfterCloseRace(t *testing.T) {
 	}
 	if ref := atomic.LoadInt32(&p.ref); ref != 0 {
 		t.Fatalf("expected ref == 0 after nil conn check, got %d", ref)
+	}
+}
+
+func TestDecrRefRedundantDoesNotShrink(t *testing.T) {
+	p := &pool{
+		ref:     0,
+		current: 4,
+		opt: Options{
+			MaxIdle:   2,
+			MaxActive: 4,
+		},
+		conns: make([]*conn, 4),
+	}
+	for i := range p.conns {
+		p.conns[i] = &conn{pool: p}
+	}
+
+	p.decrRef()
+
+	if ref := atomic.LoadInt32(&p.ref); ref != 0 {
+		t.Fatalf("expected ref == 0 after redundant decrRef, got %d", ref)
+	}
+	if current := atomic.LoadInt32(&p.current); current != 4 {
+		t.Fatalf("redundant decrRef must not shrink the pool, current = %d", current)
+	}
+	for i, c := range p.conns {
+		if c == nil {
+			t.Fatalf("redundant decrRef must not reset conns[%d]", i)
+		}
+	}
+}
+
+func TestConcurrentGetCloseBalancesRef(t *testing.T) {
+	p := &pool{
+		current: 1,
+		opt: Options{
+			OptionType: SingleConn,
+			MaxIdle:    1,
+			MaxActive:  1,
+		},
+		conns: make([]*conn, 1),
+	}
+	p.conns[0] = &conn{pool: p}
+
+	var wg sync.WaitGroup
+	const workers = 8
+	const iterations = 500
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				c, err := p.Get()
+				if err != nil {
+					t.Errorf("Get failed: %v", err)
+					return
+				}
+				// Exercise the active-time read path concurrently with Get's
+				// deferred write; -race must stay clean.
+				_, _ = p.GetActiveTimeAndRef()
+				if err := c.Close(); err != nil {
+					t.Errorf("Close failed: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	if ref := atomic.LoadInt32(&p.ref); ref != 0 {
+		t.Fatalf("expected ref == 0 after concurrent Get/Close, got %d", ref)
 	}
 }
